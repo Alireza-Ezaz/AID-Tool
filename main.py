@@ -1,11 +1,15 @@
 import pandas as pd
 import numpy as np
+import time
 
 
-# Section 1: Candidate selection
-# Given the raw traces, we first
-# generate a set of candidate service pairs (P, C) where service
-# P directly invokes service C and P and C are different services.
+# Convert timestamp to time.
+def ts_to_time(ts):
+    time_array = time.localtime(ts)
+    result = time.strftime("%Y-%m-%d %H:%M", time_array)
+    return result
+
+
 def load_dataset(dataset_name):
     # Reading a comma-separated values (csv) file into DataFrame.
     trace = pd.read_csv(dataset_name)
@@ -42,7 +46,49 @@ def create_candidate_pairs(trace):
     return candidate_pairs
 
 
-dependency_candidates = create_candidate_pairs(load_dataset('status_1min_20210411.csv.xz'))
+def create_status(ds):
+    unique_services = list(ds['child_id'].unique())  # get unique child IDs
+
+    ds['from_duration_sum'] = ds['from_duration_avg'] * ds['call_num_sum']
+    ds['to_duration_sum'] = ds['to_duration_avg'] * ds['call_num_sum']
+    ds['from_err_num_sum'] = ds['from_err_num_avg'] * ds['call_num_sum']
+    ds['to_err_num_sum'] = ds['to_err_num_avg'] * ds['call_num_sum']
+    ds['ts'] = ds['ts'].apply(ts_to_time)
+
+    tmpdf = ds.groupby(['child_id', 'ts']).agg({
+        'call_num_sum': np.sum,
+        'from_duration_sum': np.sum,
+        'from_duration_max': np.max,
+        'to_duration_sum': np.sum,
+        'to_duration_max': np.max,
+        'from_err_num_sum': np.sum,
+        'from_err_num_max': np.max,
+        'to_err_num_sum': np.sum,
+        'to_err_num_max': np.max
+    })
+    tmpdf['from_duration_avg'] = tmpdf['from_duration_sum'] / \
+                                 tmpdf['call_num_sum']
+    tmpdf['to_duration_avg'] = tmpdf['to_duration_sum'] / \
+                               tmpdf['call_num_sum']
+    tmpdf['from_err_rate'] = tmpdf['from_err_num_sum'] / \
+                             tmpdf['call_num_sum']
+    tmpdf['to_err_rate'] = tmpdf['to_err_num_sum'] / \
+                           tmpdf['call_num_sum']
+    tmpdf.drop(columns=['from_duration_sum',
+                        'to_duration_sum',
+                        'from_err_num_sum',
+                        'to_err_num_sum'], inplace=True)
+    print(tmpdf.reset_index())
+    with open('status.csv', 'w') as f:
+        tmpdf.to_csv(f)
+
+
+# Section 1: Candidate selection
+# Given the raw traces, we first
+# generate a set of candidate service pairs (P, C) where service
+# P directly invokes service C and P and C are different services.
+dataset = load_dataset('status_1min_20210411.csv.xz')
+dependency_candidates = create_candidate_pairs(dataset)
 
 # Section 2: Status generation
 # The status of one service is composed
@@ -50,3 +96,4 @@ dependency_candidates = create_candidate_pairs(load_dataset('status_1min_2021041
 # duration of invocations, error of invocations. Each aspect of
 # the service’s status contains one or more Key Performance
 # Indicators (KPIs),
+create_status(dataset)
