@@ -2,6 +2,10 @@ import pandas as pd
 import numpy as np
 
 
+# Section 1: Candidate selection
+# Given the raw traces, we first
+# generate a set of candidate service pairs (P, C) where service
+# P directly invokes service C and P and C are different services.
 def load_dataset(dataset_name):
     # Reading a comma-separated values (csv) file into DataFrame.
     trace = pd.read_csv(dataset_name)
@@ -25,10 +29,8 @@ def load_dataset(dataset_name):
 
 
 def create_candidate_pairs(trace):
-    print(trace.groupby(['parent_id', 'child_id'])
-          .agg({'call_num_sum': np.sum}))
+    # print(trace.groupby(['parent_id', 'child_id']).agg({'call_num_sum': np.sum}))
     trace = trace.groupby(['parent_id', 'child_id']).agg({'call_num_sum': np.sum}).reset_index()
-    # print(trace)
     candidate_pairs = []
 
     for i in range(trace.shape[0]):  # trace.shape[0] is the number of rows in the DataFrame.
@@ -40,4 +42,11 @@ def create_candidate_pairs(trace):
     return candidate_pairs
 
 
-candidate_pairs = create_candidate_pairs(load_dataset('status_1min_20210411.csv.xz'))
+dependency_candidates = create_candidate_pairs(load_dataset('status_1min_20210411.csv.xz'))
+
+# Section 2: Status generation
+# The status of one service is composed
+# of three aspects of dependency, i.e., number of invocations,
+# duration of invocations, error of invocations. Each aspect of
+# the service’s status contains one or more Key Performance
+# Indicators (KPIs),
