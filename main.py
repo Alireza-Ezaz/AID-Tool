@@ -47,6 +47,12 @@ def create_candidate_pairs(trace):
 
 
 def create_status(ds):
+    # Formally, given all the spans in the cloud system over a long
+    # period T, we first initiate S × N empty bins of the predefined
+    # size τ = 1 minute . S is the number of microservices. N, determined by T / τ,
+    # is the number of bins. Then we distribute all spans into
+    # different bins according to their timestamp and service name .
+    # After that, we calculate the KPIS for each bin.
     unique_services = list(ds['child_id'].unique())  # get unique child IDs
 
     ds['from_duration_sum'] = ds['from_duration_avg'] * ds['call_num_sum']
@@ -101,6 +107,10 @@ dependency_candidates = create_candidate_pairs(dataset)
 modified_dataset, unique_services = create_status(dataset)
 
 # Section 2-2: Extracting KPIs(Key Performance Indicators)
+#  If a service is not invoked in a particular bin (i.e.,
+# the corresponding bin is empty), all the KPIs will be zero. In
+# the end, we get the KPIs of every service M at every period
+# t. Ordering the bins by t, we get three time series of KPIs for each cloud service
 KPIs = list(modified_dataset.columns)
 
 print(*KPIs, sep='\n')
