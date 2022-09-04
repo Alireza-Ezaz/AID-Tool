@@ -53,6 +53,7 @@ def create_status(ds):
     ds['to_duration_sum'] = ds['to_duration_avg'] * ds['call_num_sum']
     ds['from_err_num_sum'] = ds['from_err_num_avg'] * ds['call_num_sum']
     ds['to_err_num_sum'] = ds['to_err_num_avg'] * ds['call_num_sum']
+    # convert timestamp to time
     ds['ts'] = ds['ts'].apply(ts_to_time)
 
     tmpdf = ds.groupby(['child_id', 'ts']).agg({
@@ -78,9 +79,10 @@ def create_status(ds):
                         'to_duration_sum',
                         'from_err_num_sum',
                         'to_err_num_sum'], inplace=True)
-    print(tmpdf.reset_index())
-    with open('status.csv', 'w') as f:
-        tmpdf.to_csv(f)
+    # print(tmpdf.reset_index())
+    # with open('service-status.csv', 'w') as f:
+    #     tmpdf.to_csv(f)
+    return tmpdf, unique_services
 
 
 # Section 1: Candidate selection
@@ -90,10 +92,15 @@ def create_status(ds):
 dataset = load_dataset('status_1min_20210411.csv.xz')
 dependency_candidates = create_candidate_pairs(dataset)
 
-# Section 2: Status generation
+# Section 2-1: Status generation
 # The status of one service is composed
 # of three aspects of dependency, i.e., number of invocations,
 # duration of invocations, error of invocations. Each aspect of
 # the service’s status contains one or more Key Performance
 # Indicators (KPIs),
-create_status(dataset)
+modified_dataset, unique_services = create_status(dataset)
+
+# Section 2-2: Extracting KPIs(Key Performance Indicators)
+KPIs = list(modified_dataset.columns)
+
+print(*KPIs, sep='\n')
