@@ -1,6 +1,9 @@
 import pandas as pd
 import numpy as np
 import time
+import json
+
+from tseries import CompoundTransform
 
 
 def ts_to_time(ts):
@@ -88,6 +91,49 @@ def create_status(ds):
     return tmpdf, unique_services
 
 
+def transform(TSDict, cmdbId, kpi, rowIdx):
+    srs = pd.Series(TSDict.loc[cmdbId][kpi], index=rowIdx).fillna(0)
+    return CompoundTransform(srs, [('ZN',), ("MA", 15)])
+
+
+def calculate_dsw_distance(child_tseries, parent_tseries, mpw, delta=1, d=lambda x, y: abs(x - y) ** 2):
+    """Computes dsw distance between parent and child
+
+    Args:
+        child_tseries: time series child
+        parent_tseries: time series parent
+        mpw: max propagation window
+        delta: allowed time shift in the system
+        d: distance function
+
+    Returns:
+        dsw distance
+    """
+
+    # Create cost matrix via broadcasting with large int
+    parent_tseries, child_tseries = np.array(parent_tseries), np.array(child_tseries)
+    M, N = len(child_tseries), len(parent_tseries)
+    cost = np.ones((M, N))
+
+    # Initialize the first row and column
+    cost[0, 0] = d(parent_tseries[0], child_tseries[0])
+    for i in range(1, M):
+        cost[i, 0] = cost[i - 1, 0] + d(child_tseries[i], parent_tseries[0])
+
+    for j in range(1, N):
+        cost[0, j] = cost[0, j - 1] + d(child_tseries[0], parent_tseries[j])
+
+    # Populate rest of cost matrix within window
+    for i in range(1, M):
+        for j in range(max(1, i - mpw - delta), min(N, i + delta)):
+            choices = cost[i - 1, j - 1], cost[i, j - 1], cost[i - 1, j]
+            cost[i, j] = min(choices) + d(child_tseries[i], parent_tseries[j])
+
+    # Return DSW
+    print('cost[-1, -1]:', cost[-1, -1])
+    return cost[-1, -1]
+
+
 # Section 1-1: Candidate selection
 # Given the raw traces, we first
 # generate a set of candidate service pairs (P, C) where service
@@ -115,6 +161,11 @@ print('Number of services in parent set but not in child set: {}\n'.format(len(p
 # Only keep candidate calls whose parents appear as others' children and sort them by the number of calls.
 filtered_candidates = sorted(filter(lambda x: x['p'] in child_set, dependency_candidates), key=lambda x: x['cnt'],
                              reverse=True)
+# with open('filtered-candidates.csv', 'w') as f:
+#     f.write('parent_id,child_id,cnt\n')
+#     for item in filtered_candidates:
+#         f.write("%s,%s,%s\n" % (item['p'], item['c'], item['cnt']))
+print('Number of filtered candidates: {}'.format(len(filtered_candidates)))
 
 # Section 2-1: Status generation
 # The status of one service is composed
@@ -138,3 +189,58 @@ KPIs = list(modified_dataset.columns)
 #     f.write('KPIs\n')
 #     for item in KPIs:
 #         f.write("%s\n" % item)
+
+# Section 3: Calculating the dependency intensity
+
+# bin_indexes is an interval list starting from 00:00:00 to 23:59:00 with 1 minute interval
+bin_indexes = pd.date_range(f"2021-04-11 00:00:00",
+                            f"2021-04-11 23:59:00", freq=f'1T')
+print('Start time: {}'.format(bin_indexes[0]))
+print('Interval: 1 minute')
+print('End time: {}\n'.format(bin_indexes[-1]))
+
+# srs_c = pd.Series(modified_dataset.loc[filtered_candidates[300]['c']]['call_num_sum'], index=bin_indexes).fillna(0)
+# srs_p = pd.Series(modified_dataset.loc[filtered_candidates[300]['p']]['call_num_sum'], index=bin_indexes).fillna(0)
+# print(CompoundTransform(srs_c, [('ZN',), ("MA", 15)]))
+
+for candidate in filtered_candidates:
+    # calculating dsw distance for each candidate pair and each KPI
+    for kpi in KPIs:
+        # candidate[f'dsw-{kpi}'] = calculate_dsw_distance(
+        #     CompoundTransform(pd.Series(modified_dataset.loc[candidate['c']][kpi], index=bin_indexes).fillna(0),
+        #                       [('ZN',), ("MA", 15)]),
+        #     CompoundTransform(pd.Series(modified_dataset.loc[candidate['p']][kpi], index=bin_indexes).fillna(0),
+        #                       [('ZN',), ("MA", 15)]),
+        #     mpw=mpw)
+        candidate[f'dsw-{kpi}'] = calculate_dsw_distance(
+            transform(modified_dataset, candidate['c'], kpi, bin_indexes),
+            transform(modified_dataset, candidate['p'], kpi, bin_indexes),
+            mpw=5)
+        print(candidate[f'dsw-{kpi}'])
+# Normalize the DSW distance using min-max normalization
+for kpi in KPIs:
+    allValues = list(map(lambda x: x[f'dsw-{kpi}'], filtered_candidates))
+    maxValue = np.max(allValues)
+    minValue = np.min(allValues)
+    for ca in filtered_candidates:
+        ca[f'normalized-dsw-{kpi}'] = ca[f'dsw-{kpi}'] - minValue
+        if maxValue - minValue > 0:
+            ca[f'normalized-dsw-{kpi}'] /= maxValue - minValue
+# calculating the dependency intensity
+for cnd in filtered_candidates:
+    sims_dsw = []
+    for kpi in KPIs:
+        sims_dsw.append(cnd[f'normalized-dsw-{kpi}'])
+    # distance = 0 -> most similar, so need to use 1-agg
+    cnd[f'intensity'] = 1 - np.mean(sims_dsw)
+
+# sort the candidates by the dependency intensity
+filtered_candidates.sort(key=lambda x: x['intensity'], reverse=True)
+filtered_candidates_with_intensity = list(map(
+    lambda x: {"c": x["c"],
+               "p": x["p"],
+               "intensity": x["intensity"]},
+    filtered_candidates)
+)
+with open('filtered-candidates-with-intensity.json', 'w') as f:
+    json.dump(filtered_candidates_with_intensity, f, indent=2)
