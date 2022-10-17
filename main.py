@@ -2,6 +2,8 @@ import pandas as pd
 import numpy as np
 import time
 import json
+from typing import List, Optional, Tuple
+import io
 
 from tseries import CompoundTransform
 
@@ -9,7 +11,7 @@ from tseries import CompoundTransform
 def ts_to_time(ts):
     # Convert timestamp to time.
     time_array = time.localtime(ts)
-    result = time.strftime("%Y-%m-%d %H:%M", time_array)
+    result = time.strftime("%Y-%m-%d %H:%M:%S", time_array)
     return result
 
 
@@ -41,6 +43,7 @@ def create_candidate_pairs(trace):
     candidate_pairs = []
 
     for i in range(trace.shape[0]):  # trace.shape[0] is the number of rows in the DataFrame.
+        # p invokes c at least once
         candidate_pairs.append({
             'c': trace.iloc[i]['child_id'],
             'p': trace.iloc[i]['parent_id'],
@@ -63,7 +66,7 @@ def create_status(ds):
     ds['from_err_num_sum'] = ds['from_err_num_avg'] * ds['call_num_sum']
     ds['to_err_num_sum'] = ds['to_err_num_avg'] * ds['call_num_sum']
     # convert timestamp to time
-    ds['ts'] = ds['ts'].apply(ts_to_time)
+    ds['ts'] = ds['ts'].apply(ts_to_time).apply(pd.to_datetime)
 
     tmpdf = ds.groupby(['child_id', 'ts']).agg({
         'call_num_sum': np.sum,
@@ -92,6 +95,7 @@ def create_status(ds):
 
 
 def transform(TSDict, cmdbId, kpi, rowIdx):
+    # print(TSDict.loc[cmdbId][kpi])
     srs = pd.Series(TSDict.loc[cmdbId][kpi], index=rowIdx).fillna(0)
     return CompoundTransform(srs, [('ZN',), ("MA", 15)])
 
@@ -130,8 +134,12 @@ def calculate_dsw_distance(child_tseries, parent_tseries, mpw, delta=1, d=lambda
             cost[i, j] = min(choices) + d(child_tseries[i], parent_tseries[j])
 
     # Return DSW
-    print('cost[-1, -1]:', cost[-1, -1])
+    # print('cost[-1, -1]:', cost[-1, -1])
     return cost[-1, -1]
+
+
+def genDate(datestr):
+    return f"{datestr[:4]}-{datestr[4:6]}-{datestr[6:8]}"
 
 
 # Section 1-1: Candidate selection
@@ -193,25 +201,15 @@ KPIs = list(modified_dataset.columns)
 # Section 3: Calculating the dependency intensity
 
 # bin_indexes is an interval list starting from 00:00:00 to 23:59:00 with 1 minute interval
-bin_indexes = pd.date_range(f"2021-04-11 00:00:00",
-                            f"2021-04-11 23:59:00", freq=f'1T')
+bin_indexes = pd.date_range(f'{genDate("20210411")} 00:00:00',
+                            f'{genDate("20210411")} 23:59:00', freq='1T')
 print('Start time: {}'.format(bin_indexes[0]))
 print('Interval: 1 minute')
 print('End time: {}\n'.format(bin_indexes[-1]))
 
-# srs_c = pd.Series(modified_dataset.loc[filtered_candidates[300]['c']]['call_num_sum'], index=bin_indexes).fillna(0)
-# srs_p = pd.Series(modified_dataset.loc[filtered_candidates[300]['p']]['call_num_sum'], index=bin_indexes).fillna(0)
-# print(CompoundTransform(srs_c, [('ZN',), ("MA", 15)]))
-
 for candidate in filtered_candidates:
     # calculating dsw distance for each candidate pair and each KPI
     for kpi in KPIs:
-        # candidate[f'dsw-{kpi}'] = calculate_dsw_distance(
-        #     CompoundTransform(pd.Series(modified_dataset.loc[candidate['c']][kpi], index=bin_indexes).fillna(0),
-        #                       [('ZN',), ("MA", 15)]),
-        #     CompoundTransform(pd.Series(modified_dataset.loc[candidate['p']][kpi], index=bin_indexes).fillna(0),
-        #                       [('ZN',), ("MA", 15)]),
-        #     mpw=mpw)
         candidate[f'dsw-{kpi}'] = calculate_dsw_distance(
             transform(modified_dataset, candidate['c'], kpi, bin_indexes),
             transform(modified_dataset, candidate['p'], kpi, bin_indexes),
