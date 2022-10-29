@@ -6,6 +6,7 @@ from typing import List, Optional, Tuple
 import io
 
 from tseries import CompoundTransform
+import matplotlib.pyplot as plt
 
 
 def ts_to_time(ts):
@@ -95,8 +96,11 @@ def create_status(ds):
 
 
 def transform(TSDict, cmdbId, kpi, rowIdx):
-    # print(TSDict.loc[cmdbId][kpi])
+    print(TSDict.loc[cmdbId][kpi])
     srs = pd.Series(TSDict.loc[cmdbId][kpi], index=rowIdx).fillna(0)
+    # plt.plot(CompoundTransform(srs, [('ZN',), ("MA", 15)]))
+    # plt.subplots(figsize=(20, 10))
+    # plt.show()
     return CompoundTransform(srs, [('ZN',), ("MA", 15)])
 
 
@@ -215,6 +219,10 @@ for candidate in filtered_candidates:
             transform(modified_dataset, candidate['p'], kpi, bin_indexes),
             mpw=5)
         print(candidate[f'dsw-{kpi}'])
+with open('service-representation.csv', 'w') as f:
+    f.write('parent_id,child_id,cnt,dsw-invocation,dsw-duration,dsw-error\n')
+    for item in filtered_candidates:
+        f.write("%s,%s,%s,%s,%s,%s\n" % (item['p'], item['c'], item['cnt'], item[f'dsw-call_num_sum'],item[f'dsw-from_duration_max'],item[f'dsw-to_duration_max']))
 # Normalize the DSW distance using min-max normalization
 for kpi in KPIs:
     allValues = list(map(lambda x: x[f'dsw-{kpi}'], filtered_candidates))
